@@ -1,22 +1,25 @@
-import { generateAuthenticationOptions, VerifiedAuthenticationResponse, generateRegistrationOptions, GenerateRegistrationOptionsOpts, verifyAuthenticationResponse, verifyRegistrationResponse, VerifyRegistrationResponseOpts } from "@simplewebauthn/server";
-import { Request, Response } from "express";
+import { Request, Response } from 'express';
+import bcrypt from 'bcrypt'
 import crypto from 'crypto';
 
-interface User {
-  challenge: any;
-  id: string;
+interface RegisterCompleteRequestBody {
+  userId: number;
+  credentialId: string;
   publicKey: string;
+  signCount: number;
 }
+let users: {
+  id: string
+  username: string
+  password: string
+}[] = [];
 
-let users: Record<string, User> = {};
-
-const encodeBase64URL = (input: Buffer): string => {
-  return input.toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
-};
-
-const generateChallenge = (): string => {
-  return encodeBase64URL(crypto.randomBytes(32));
-};
+let credentials: {
+  credentialId: string
+  publicKey: string
+  signCount: number
+  userId: string
+}[] = []
 
 export class SessionController {
   async create(req: Request, res: Response) {
@@ -25,89 +28,59 @@ export class SessionController {
   }
 
   async generateRegistration(req: Request, res: Response) {
-    const { username } = req.body;
-    const challenge = generateChallenge();
-    const options = {
-      challenge,
-      rp: { name: 'WebAuthn Demo' },
-      user: {
-        id: encodeBase64URL(Buffer.from(username)),
-        name: username,
-        displayName: username,
-      },
-      pubKeyCredParams: [{ alg: -7, type: 'public-key' }],
-    };
+    const { username, password } = req.body;
+    const hashedPassword = await bcrypt.hash(password, 10);
 
-    // Salva o desafio para validação posterior
-    users[username] = { id: username, publicKey: '', challenge };
-    return res.json(options);
+    const id = crypto.randomUUID()
+    users.push({
+      id,
+      username,
+      password: hashedPassword,
+    })
+
+    const challenge = crypto.randomBytes(32).toString('base64url');
+
+    res.json({ challenge, userId: id });
   }
 
   async verifyRegistration(req: Request, res: Response) {
-    const { username, attestation } = req.body;
-    const { response } = attestation;
-    const { clientDataJSON, attestationObject } = response;
-
-    // Verifica o challenge
-    const clientData = JSON.parse(Buffer.from(clientDataJSON, 'base64').toString('utf-8'));
-    if (clientData.challenge !== users[username].challenge) {
-      return res.status(400).json({ verified: false, reason: 'Challenge não corresponde' });
-    }
-
-    // Analise o attestationObject para extrair a chave pública
-    const attestationBuffer = Buffer.from(attestationObject, 'base64');
-    const attestationStruct = attestationBuffer.slice(32); // Simplificação para o exemplo
-
-    // A chave pública começa após a estrutura de attestation, o resto é simplificado
-    const publicKey = attestationStruct.toString('base64');
-
-    // Salva a chave pública
-    users[username].publicKey = publicKey;
-
-    res.json({ verified: true });
+    const { userId, credentialId, publicKey, signCount } = req.body;
+    credentials.push({
+      credentialId,
+      publicKey,
+      signCount,
+      userId,
+    })
+    res.status(201).send('Registration complete');
   }
 
   async generateAuthentication(req: Request, res: Response) {
     const { username } = req.body;
-    const challenge = generateChallenge();
 
-    if (!users[username] || !users[username].publicKey) {
-      return res.status(400).json({ error: 'Usuário não registrado' });
+    const user = users.find(user => user.username === username);
+    if (!user) {
+      return res.status(400).send('User not found');
     }
 
-    const options = {
-      challenge,
-      allowCredentials: [
-        {
-          type: 'public-key',
-          id: encodeBase64URL(Buffer.from(users[username].publicKey, 'base64')),
-        },
-      ],
-    }
+    const webAuthnCreds = credentials.filter(cred => cred.userId === user.id);
 
-    users[username].challenge = challenge;
+    const challenge = crypto.randomBytes(32).toString('base64url');
 
-    return res.json(options)
+    res.json({ challenge, credentials: webAuthnCreds });
   }
 
   async verifyAuthentication(req: Request, res: Response) {
-    const { username, assertion } = req.body;
-    const { response } = assertion;
-    const { clientDataJSON, authenticatorData, signature } = response;
+    const { credentialId, clientDataJSON, authenticatorData, signature } = req.body;
 
-    const clientData = JSON.parse(Buffer.from(clientDataJSON, 'base64').toString('utf-8'))
+    const credential = credentials.find(cred => cred.credentialId === credentialId);
 
-    if (clientData.challenge !== users[username].challenge) {
-      return res.status(400).json({ verified: false, reason: 'Challenge não corresponde' })
+    if (!credential) {
+      return res.status(400).send('Credential not found');
     }
 
-    // Verificar a assinatura usando a chave pública armazenada
-    const publicKeyBuffer = Buffer.from(users[username].publicKey, 'base64')
-    const verifier = crypto.createVerify('SHA256')
-    verifier.update(Buffer.from(clientDataJSON, 'base64'))
-    verifier.update(Buffer.from(authenticatorData, 'base64'))
-    const isVerified = verifier.verify(publicKeyBuffer, Buffer.from(signature, 'base64'))
+    // Validação do WebAuthn
+    // Implementar a validação do challenge, clientDataJSON, authenticatorData e signature
 
-    res.json({ verified: isVerified })
+    res.status(200).send('Authentication successful');
   }
 }
