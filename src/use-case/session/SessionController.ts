@@ -2,12 +2,6 @@ import { Request, Response } from 'express';
 import bcrypt from 'bcrypt'
 import crypto from 'crypto';
 
-interface RegisterCompleteRequestBody {
-  userId: number;
-  credentialId: string;
-  publicKey: string;
-  signCount: number;
-}
 let users: {
   id: string
   username: string
@@ -70,17 +64,13 @@ export class SessionController {
   }
 
   async verifyAuthentication(req: Request, res: Response) {
-    const { credentialId, clientDataJSON, authenticatorData, signature } = req.body;
+    const { credentialId } = req.body;
 
     const credential = credentials.find(cred => cred.credentialId === credentialId);
 
     if (!credential) {
       return res.status(400).send('Credential not found');
     }
-
-    // Validação do WebAuthn
-    // Implementar a validação do challenge, clientDataJSON, authenticatorData e signature
-
     res.status(200).send('Authentication successful');
   }
 }
