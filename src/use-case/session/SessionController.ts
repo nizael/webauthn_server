@@ -16,11 +16,6 @@ let credentials: {
 }[] = []
 
 export class SessionController {
-  async create(req: Request, res: Response) {
-    console.log(req.body)
-    return res.status(201).json({ success: true })
-  }
-
   async generateRegistration(req: Request, res: Response) {
     const { username, password } = req.body;
     const hashedPassword = await bcrypt.hash(password, 10);
